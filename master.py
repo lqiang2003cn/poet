@@ -39,7 +39,7 @@ parser.add_argument('--eval_batches_per_step', type=int, default=50)
 parser.add_argument('--n_iterations', type=int, default=200)
 parser.add_argument('--steps_before_transfer', type=int, default=25)
 parser.add_argument('--master_seed', type=int, default=111)
-parser.add_argument('--repro_threshold', type=int, default=100)
+parser.add_argument('--repro_threshold', type=int, default=100)#the minimal
 parser.add_argument('--mc_lower', type=int, default=25)
 parser.add_argument('--mc_upper', type=int, default=340)
 parser.add_argument('--max_num_envs', type=int, default=100)
@@ -59,14 +59,14 @@ def run_main(args):
     import ipyparallel as ipp
 
     client = ipp.Client()
-    engines = client[:]
+    engines = client[:]#the number of workers started by ipp(ipyparallel)
     engines.block = True
     scheduler = client.load_balanced_view()
     engines.apply(initialize_worker)
 
     #set master_seed
     np.random.seed(args.master_seed)
-
+    #create a flat env and add an optimizer to the env
     optimizer_zoo = MultiESOptimizer(args=args, engines=engines, scheduler=scheduler, client=client)
 
     optimizer_zoo.optimize(
@@ -74,6 +74,7 @@ def run_main(args):
         propose_with_adam=args.propose_with_adam,
         reset_optimizer=True,
         checkpointing=args.checkpointing,
+        #steps_before_transfer=1)
         steps_before_transfer=args.steps_before_transfer)
     #client.shutdown()
 

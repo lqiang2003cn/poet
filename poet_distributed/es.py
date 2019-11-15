@@ -154,7 +154,7 @@ class ESOptimizer:
         from .optimizers import Adam, SimpleSGD
 
         logger.debug('Creating optimizer {}...'.format(optim_id))
-        self.optim_id = optim_id
+        self.optim_id = optim_id #the id of the env:every optimization is done in an env
         self.engines = engines
         engines.block = True
         self.scheduler = scheduler

@@ -24,7 +24,7 @@ from poet_distributed.reproduce_ops import Reproducer
 from poet_distributed.novelty import compute_novelty_vs_archive
 import json
 
-
+#env:the encodings of the env,i.e., a set of parameters;  niche:the actual env created based on the env parameters
 def construct_niche_fns_from_env(args, env, seed):
     def niche_wrapper(configs, seed):  # force python to make a new lexical scope
         def make_niche():
@@ -43,8 +43,9 @@ def construct_niche_fns_from_env(args, env, seed):
 
 
 class MultiESOptimizer:
+    #create an
     def __init__(self, args, engines, scheduler, client):
-
+        #initializations about ipp
         self.args = args
         self.engines = engines
         self.engines.block = True
@@ -56,6 +57,7 @@ class MultiESOptimizer:
         self.env_reproducer = Reproducer(args)
         self.optimizers = OrderedDict()
 
+        #start the training from a previously generated env file, as json format
         if args.start_from:
             logger.debug("args.start_from {}".format(args.start_from))
             with open(args.start_from) as f:
@@ -87,9 +89,9 @@ class MultiESOptimizer:
                 seed = exp['seed']
                 self.add_optimizer(env=env, seed=seed, model_params=model_params)
 
-        else:
+        else:#start from an empty
             env = Env_config(
-                name='flat',
+                name='flat',#the default name of the env
                 ground_roughness=0,
                 pit_gap=[],
                 stump_width=[],
@@ -98,13 +100,13 @@ class MultiESOptimizer:
                 stair_height=[],
                 stair_width=[],
                 stair_steps=[])
-
+            #every optimaizer is based on an env and maintains parameters for an agent
             self.add_optimizer(env=env, seed=args.master_seed)
 
     def create_optimizer(self, env, seed, created_at=0, model_params=None, is_candidate=False):
 
         assert env != None
-
+        #
         optim_id, niche_fn = construct_niche_fns_from_env(args=self.args, env=env, seed=seed)
 
         niche = niche_fn()
@@ -137,7 +139,7 @@ class MultiESOptimizer:
             created_at=created_at,
             is_candidate=is_candidate)
 
-
+    #model_params is the parameter of an Agent:each Optimizer corresponds to an Env and Agent
     def add_optimizer(self, env, seed, created_at=0, model_params=None):
         '''
             creat a new optimizer/niche
@@ -151,7 +153,7 @@ class MultiESOptimizer:
         assert optim_id not in self.env_archive.keys()
         self.env_registry[optim_id] = env
         self.env_archive[optim_id] = env
-        #dump the env
+        #dump the env:clear the original env file and rewrite a new env json to it
         log_file = self.args.log_file
         env_config_file = log_file + '/' + log_file.split('/')[-1] + '.' + optim_id + '.env.json'
         record = {'config': env._asdict(), 'seed': seed}
@@ -185,6 +187,7 @@ class MultiESOptimizer:
         self.scheduler.results.clear()
         #self.client.results.clear()
         #self.client.metadata.clear()
+
 
     def ind_es_step(self, iteration):
         tasks = [o.start_step() for o in self.optimizers.values()]
@@ -246,13 +249,16 @@ class MultiESOptimizer:
 
         self.clean_up_ipyparallel()
 
+    # check if any env's self_evals is above the reproduce threshold,
+    # if one does, then add it to the repro_candidates list;
+    # plus: this function has nothing to do with the iteration and delete_candidates,
     def check_optimizer_status(self, iteration):
         '''
             return two lists
         '''
         logger.info("health_check")
         repro_candidates, delete_candidates = [], []
-        for optim_id in self.env_registry.keys():
+        for optim_id in self.env_registry.keys():#find the already registered env
             o = self.optimizers[optim_id]
             logger.info("niche {} created at {} start_score {} current_self_evals {}".format(
                 optim_id, o.created_at, o.start_score, o.self_evals))
@@ -317,11 +323,13 @@ class MultiESOptimizer:
         child_list = sorted(child_list,key=lambda x: x[3], reverse=True)
         return child_list
 
+
     def adjust_envs_niches(self, iteration, steps_before_adjust, max_num_envs=None, max_children=8, max_admitted=1):
-
+        print("the interval of adjusting env:",steps_before_adjust)
         if iteration > 0 and iteration % steps_before_adjust == 0:
+        #if iteration % steps_before_adjust == 0:
             list_repro, list_delete = self.check_optimizer_status(iteration)
-
+            #if no env is qualified for reproducing, then do nothing and just return
             if len(list_repro) == 0:
                 return
 
@@ -365,25 +373,29 @@ class MultiESOptimizer:
             self.delete_optimizer(optim_id)
 
     def optimize(self, iterations=200,
-                 steps_before_transfer=25,
+                 steps_before_transfer=25,#
                  propose_with_adam=False,
                  checkpointing=False,
                  reset_optimizer=True):
-
+        #define the number of iteration
         for iteration in range(iterations):
-
-            self.adjust_envs_niches(iteration, self.args.adjust_interval * steps_before_transfer,
-                                    max_num_envs=self.args.max_num_envs)
+            #adjust the env:randomly generate more envs
+            self.adjust_envs_niches(
+                iteration,
+                self.args.adjust_interval * steps_before_transfer,
+                max_num_envs=self.args.max_num_envs)
 
             for o in self.optimizers.values():
                 o.clean_dicts_before_iter()
 
+            #
             self.ind_es_step(iteration=iteration)
 
             if len(self.optimizers) > 1 and iteration % steps_before_transfer == 0:
-                self.transfer(propose_with_adam=propose_with_adam,
-                              checkpointing=checkpointing,
-                              reset_optimizer=reset_optimizer)
+                self.transfer(
+                    propose_with_adam=propose_with_adam,
+                    checkpointing=checkpointing,
+                    reset_optimizer=reset_optimizer)
 
             if iteration % steps_before_transfer == 0:
                 for o in self.optimizers.values():
