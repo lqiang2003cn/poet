@@ -74,7 +74,7 @@ class Reproducer:
 
 
     def mutate(self, parent):
-
+        #the code of generating new env:try to replace it with a deep neural network
         ground_roughness=parent.ground_roughness
         pit_gap = list(parent.pit_gap)
         stump_width=list(parent.stump_width)

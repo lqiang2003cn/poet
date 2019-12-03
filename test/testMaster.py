@@ -12,15 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 from argparse import ArgumentParser
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-import numpy as np
-
 from poet_distributed.es import initialize_worker  # noqa
 from poet_distributed.poet_algo import MultiESOptimizer  # noqa
+import numpy as np
+
 
 parser = ArgumentParser()
 parser.add_argument('log_file')
@@ -55,7 +54,10 @@ parser.add_argument('--start_from', default=None)  # Json file to start from
 args = parser.parse_args()
 logger.info(args)
 
-def run_main(args):
+
+
+def test_main(args):
+
     import ipyparallel as ipp
 
     client = ipp.Client()
@@ -66,19 +68,14 @@ def run_main(args):
 
     #set master_seed
     np.random.seed(args.master_seed)
-    #create a flat env and add an optimizer to the env
-    args.start_from = '/home/qiangliu/logs/start_from_config.json'
-    args.recordVideo = False
-    args.render_mode = None
+    #zoo means there a lot of optimizers in the zoo :)
+    args.start_from ='/home/qiangliu/logs/start_from_config.json'
+    args.recordVideo = True
+    args.render_mode = 'rgb_array'
     optimizer_zoo = MultiESOptimizer(args=args, engines=engines, scheduler=scheduler, client=client)
+    for op_name, op in optimizer_zoo.optimizers.items():
+        op.start_single_theta_eval(op.theta)
+    print('hold')
 
-    optimizer_zoo.optimize(
-        iterations=args.n_iterations,
-        propose_with_adam=args.propose_with_adam,
-        reset_optimizer=True,
-        checkpointing=args.checkpointing,
-        #steps_before_transfer=1)
-        steps_before_transfer=args.steps_before_transfer)
-    #client.shutdown()
 
-run_main(args)
+test_main(args)

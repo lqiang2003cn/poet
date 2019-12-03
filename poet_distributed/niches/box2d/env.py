@@ -6,17 +6,23 @@
 from collections import namedtuple
 # import gym
 from .bipedal_walker_custom import BipedalWalkerCustom, Env_config  # noqa
+import time
+import gym.wrappers
 
-
-def make_env(env_name, seed, render_mode=False, env_config=None):
+def make_env(env_name, seed, render_mode=False, env_config=None,recordVideo=False):
     if env_name.startswith("BipedalWalkerCustom"):
         assert env_config is not None
         env = BipedalWalkerCustom(env_config)
+        if recordVideo:
+            base_dir = "/home/qiangliu/ai/recordedVideos/test"
+            t = time.time()
+            dyn_dir = base_dir + str(int(t))
+            env = gym.wrappers.Monitor(env, directory=dyn_dir)
     else:
         # env = gym.make(env_name)
         raise Exception('Got env_name {}'.format(env_name))
     if render_mode and not env_name.startswith("Roboschool"):
-        env.render("human")
+        env.render(render_mode)
     if (seed >= 0):
         env.seed(seed)
 

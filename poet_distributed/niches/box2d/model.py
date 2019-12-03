@@ -104,10 +104,10 @@ class Model:
 
         self.render_mode = False
 
-    def make_env(self, seed, render_mode=False, env_config=None):
+    def make_env(self, seed, render_mode=False, env_config=None,recordVideo=False):
         self.render_mode = render_mode
         self.env = make_env(self.env_name, seed=seed,
-                            render_mode=render_mode, env_config=env_config)
+                            render_mode=render_mode, env_config=env_config,recordVideo=recordVideo)
 
     def get_action(self, x, t=0, mean_mode=False):
         # if mean_mode = True, ignore sampling.

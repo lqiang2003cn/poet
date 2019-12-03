@@ -32,6 +32,8 @@ def construct_niche_fns_from_env(args, env, seed):
             return Box2DNiche(env_configs=configs,
                             seed=seed,
                             init=args.init,
+                            recordVideo=args.recordVideo,
+                            render_mode=args.render_mode,
                             stochastic=args.stochastic)
 
         return make_niche
@@ -325,7 +327,6 @@ class MultiESOptimizer:
 
 
     def adjust_envs_niches(self, iteration, steps_before_adjust, max_num_envs=None, max_children=8, max_admitted=1):
-        print("the interval of adjusting env:",steps_before_adjust)
         if iteration > 0 and iteration % steps_before_adjust == 0:
         #if iteration % steps_before_adjust == 0:
             list_repro, list_delete = self.check_optimizer_status(iteration)

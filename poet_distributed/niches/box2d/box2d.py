@@ -30,7 +30,7 @@ DEFAULT_ENV = Env_config(
         stair_steps=[])
 
 class Box2DNiche(Niche):
-    def __init__(self, env_configs, seed, init='random', stochastic=False):
+    def __init__(self, env_configs, seed, init='random', stochastic=False,recordVideo=False,render_mode=None):
         self.model = Model(bipedhard_custom)
         if not isinstance(env_configs, list):
             env_configs = [env_configs]
@@ -39,7 +39,7 @@ class Box2DNiche(Niche):
             self.env_configs[env.name] = env
         self.seed = seed
         self.stochastic = stochastic
-        self.model.make_env(seed=seed, env_config=DEFAULT_ENV)
+        self.model.make_env(seed=seed, env_config=DEFAULT_ENV,recordVideo=recordVideo,render_mode=render_mode)
         self.init = init
 
     def add_env(self, env):

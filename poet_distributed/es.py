@@ -472,6 +472,14 @@ class ESOptimizer:
             run_eval_batch, self.eval_batches_per_step, self.eval_batch_size)
         return eval_tasks, theta, step_t_start
 
+    def start_single_theta_eval(self, theta):
+        '''eval theta in this optimizer's niche'''
+        step_t_start = time.time()
+        self.broadcast_theta(theta)
+
+        eval_tasks = self.start_chunk(run_eval_batch, 1, 1)
+        return eval_tasks, theta, step_t_start
+
     def get_theta_eval(self, res):
         eval_tasks, theta, step_t_start = res
         eval_results = self.get_chunk(eval_tasks)
