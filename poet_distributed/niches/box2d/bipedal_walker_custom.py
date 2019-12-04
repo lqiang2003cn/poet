@@ -120,7 +120,7 @@ class ContactDetector(contactListener):
             if leg in [contact.fixtureA.body, contact.fixtureB.body]:
                 leg.ground_contact = False
 
-
+#
 class BipedalWalkerCustom(gym.Env):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
