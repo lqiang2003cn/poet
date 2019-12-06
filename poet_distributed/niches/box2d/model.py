@@ -111,7 +111,7 @@ class Model:
 
     def get_action(self, x, t=0, mean_mode=False):
         # if mean_mode = True, ignore sampling.
-        h = np.array(x).flatten()
+        h = np.array(x).flatten()#obvervations(length=24) are the input of the network
         if self.time_input == 1:
             time_signal = float(t) / self.time_factor
             h = np.concatenate([h, [time_signal]])
