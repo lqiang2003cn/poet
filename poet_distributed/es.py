@@ -413,12 +413,12 @@ class ESOptimizer:
         return chunk_tasks
 
     def get_chunk(self, tasks):
-        return [task.get() for task in tasks]
+        return [task.get() for task in tasks]#defiend in the ipyparallel framework, just return the result of the task
 
     def collect_po_results(self, po_results):
-        noise_inds = np.concatenate([r.noise_inds for r in po_results])
-        returns = np.concatenate([r.returns for r in po_results])
-        lengths = np.concatenate([r.lengths for r in po_results])
+        noise_inds = np.concatenate([r.noise_inds for r in po_results])#sampling position in the range [0,2500000000]
+        returns = np.concatenate([r.returns for r in po_results])#rewards of simulation:[[+,-],[+,-],...[+,-]]
+        lengths = np.concatenate([r.lengths for r in po_results])#steps the agent walked:[[+,-],[+,-],...[+,-]]
         return noise_inds, returns, lengths
 
     def collect_eval_results(self, eval_results):
@@ -429,14 +429,14 @@ class ESOptimizer:
     def compute_grads(self, step_results, theta):
         noise_inds, returns, _ = self.collect_po_results(step_results)
 
-        pos_row, neg_row = returns.argmax(axis=0)
+        pos_row, neg_row = returns.argmax(axis=0)#find the index of max reward in the pos_column and neg_column
         noise_sign = 1.0
         po_noise_ind_max = noise_inds[pos_row]
-
+        #find the noise index of the max reward
         if returns[pos_row, 0] < returns[neg_row, 1]:
             noise_sign = -1.0
             po_noise_ind_max = noise_inds[neg_row]
-
+        #recover the theta with the max reward
         po_theta_max = theta + noise_sign * self.noise_std * noise.get(po_noise_ind_max, len(theta))
 
         if self.returns_normalization == 'centered_ranks':
@@ -449,7 +449,7 @@ class ESOptimizer:
                     self.returns_normalization))
         grads, _ = batched_weighted_sum(
             proc_returns[:, 0] - proc_returns[:, 1],
-            (noise.get(idx, len(theta)) for idx in noise_inds),
+            (noise.get(idx, len(theta)) for idx in noise_inds),#the list of sampled noise:[[2804],[2804],...[2804]]
             batch_size=500)
 
         grads /= len(returns)
@@ -507,7 +507,7 @@ class ESOptimizer:
         step_t_start = time.time()
         if theta is None:
             theta = self.theta
-        self.broadcast_theta(theta)
+        self.broadcast_theta(theta)#set the theta for all the workers
 
         step_results = self.start_chunk(
             run_po_batch,
@@ -516,15 +516,15 @@ class ESOptimizer:
             self.noise_std)
 
         return step_results, theta, step_t_start
-
+    #each task is a triple tuple: the original theta, its modified versions performing in the same env, the time started:
     def get_step(self, res, propose_with_adam=True, decay_noise=True, propose_only=False):
-        step_tasks, theta, step_t_start = res
+        step_tasks, theta, step_t_start = res#theta is a original,unmodified theta;
         step_results = self.get_chunk(step_tasks)
 
         _, po_returns, po_lengths = self.collect_po_results(
             step_results)
-        episodes_this_step = len(po_returns)
-        timesteps_this_step = po_lengths.sum()
+        episodes_this_step = len(po_returns)#how many episodes the agent finished:actually its twice as the length of the po_returns
+        timesteps_this_step = po_lengths.sum()#sum all the values in the pairs:total steps the agent took
 
         logger.debug(
             'Optimizer {} finished running {} episodes, {} timesteps'.format(
@@ -533,7 +533,7 @@ class ESOptimizer:
         grads, po_theta_max = self.compute_grads(step_results, theta)
         if not propose_only:
             update_ratio, theta = self.optimizer.update(
-                theta, -grads + self.l2_coeff * theta)
+                theta, -grads + self.l2_coeff * theta)#theta:the original theta
 
             self.optimizer.stepsize = max(
                 self.optimizer.stepsize * self.lr_decay, self.lr_limit)

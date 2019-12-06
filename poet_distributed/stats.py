@@ -12,19 +12,19 @@ def compute_ranks(x):
     Note: This is different from scipy.stats.rankdata, which returns ranks in [1, len(x)].
     """
     assert x.ndim == 1
-    ranks = np.empty(len(x), dtype=int)
-    ranks[x.argsort()] = np.arange(len(x))
-    return ranks
+    ranks = np.empty(len(x), dtype=int)#randomly generate an array of the length of x
+    ranks[x.argsort()] = np.arange(len(x))#sort the rewards and return their index
+    return ranks#get the ranked index by rewards
 
-
+#centered rank
 def compute_centered_ranks(x):
-    y = compute_ranks(x.ravel()).reshape(x.shape).astype(np.float32)
+    y = compute_ranks(x.ravel()).reshape(x.shape).astype(np.float32)#ravel means put two dimension array in one row
     y /= (x.size - 1)
     y -= .5
     return y
 
 
-def itergroups(items, group_size):
+def itergroups(items, group_size):#group size is the max number of the generated tuple
     assert group_size >= 1
     group = []
     for x in items:

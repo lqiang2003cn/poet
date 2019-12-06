@@ -194,15 +194,15 @@ class MultiESOptimizer:
     def ind_es_step(self, iteration):
         tasks = [o.start_step() for o in self.optimizers.values()]
 
-        for optimizer, task in zip(self.optimizers.values(), tasks):
+        for optimizer, task in zip(self.optimizers.values(), tasks):#
 
-            optimizer.theta, stats = optimizer.get_step(task)
-            self_eval_task = optimizer.start_theta_eval(optimizer.theta)
+            optimizer.theta, stats = optimizer.get_step(task)#compute gradient and optimize theta
+            self_eval_task = optimizer.start_theta_eval(optimizer.theta)#eval the optimized theta by run it in the env;
             self_eval_stats = optimizer.get_theta_eval(self_eval_task)
 
             logger.info('Iter={} Optimizer {} theta_mean {} best po {} iteration spent {}'.format(
                 iteration, optimizer.optim_id, self_eval_stats.eval_returns_mean,
-                stats.po_returns_max, iteration - optimizer.created_at))
+                stats.po_returns_max, iteration - optimizer.created_at))#po_return is the reward of the original theta.
 
             optimizer.update_dicts_after_es(stats=stats,
                 self_eval_stats=self_eval_stats)
@@ -401,3 +401,6 @@ class MultiESOptimizer:
             if iteration % steps_before_transfer == 0:
                 for o in self.optimizers.values():
                     o.save_to_logger(iteration)
+
+    #mutually optimization:optimize the agent and env simultaneously, and get the balanced result
+    #def optimize_mutually(self):
