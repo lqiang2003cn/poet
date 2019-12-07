@@ -61,16 +61,20 @@ EvalResult = namedtuple('EvalResult', ['returns', 'lengths'])
 logger = logging.getLogger(__name__)
 
 def initialize_worker():
-    global niches, thetas, random_state, noise
+    global niches, thetas, random_state, noise, env_params
     from .noise_module import noise
     import numpy as np
     random_state = np.random.RandomState()
-    niches, thetas = {}, {}
+    niches, thetas, env_params = {}, {},{}
 
 
 def set_worker_theta(theta, optim_id):
     global thetas
     thetas[optim_id] = theta
+
+def set_worker_env_param(env_param, optim_id):
+    global env_params
+    env_params[optim_id] = env_param
 
 
 def run_eval_batch(optim_id, batch_size, rs_seed):
@@ -110,6 +114,40 @@ def run_po_batch(optim_id, batch_size, rs_seed, noise_std):
 
     return POResult(returns=returns, noise_inds=noise_inds, lengths=lengths)
 
+
+def sample_env_params(optim_id, batch_size, rs_seed, noise_std):
+    global noise, niches, thetas, random_state
+    niche = niches[optim_id]
+
+
+def run_mutual_opt_batch(optim_id, batch_size, rs_seed, noise_std):
+    global noise, niches, thetas, random_state
+    niche = niches[optim_id]
+    theta = thetas[optim_id]
+
+    random_state.seed(rs_seed)
+
+    noise_inds = np.asarray([noise.sample_index(random_state, len(theta))
+                             for i in range(batch_size)],
+                            dtype='int')
+
+    returns = np.zeros((batch_size, 2))
+    lengths = np.zeros((batch_size, 2), dtype='int')
+
+    returns[:, 0], lengths[:, 0] = niche.rollout_batch(
+        (theta + noise_std * noise.get(noise_idx, len(theta))
+         for noise_idx in noise_inds), batch_size, random_state)
+
+    returns[:, 1], lengths[:, 1] = niche.rollout_batch(
+        (theta - noise_std * noise.get(noise_idx, len(theta))
+         for noise_idx in noise_inds), batch_size, random_state)
+
+    return POResult(returns=returns, noise_inds=noise_inds, lengths=lengths)
+
+
+def setup_env_param(optim_id,env_param):
+    global env_params
+    env_params[optim_id] = env_param
 
 def setup_worker(optim_id, make_niche):
     global niches
@@ -160,6 +198,7 @@ class ESOptimizer:
         self.scheduler = scheduler
 
         self.theta = theta
+
         #print(self.theta)
         logger.debug('Optimizer {} optimizing {} parameters'.format(
             optim_id, len(theta)))
@@ -244,6 +283,10 @@ class ESOptimizer:
         self.best_score = None
         self.best_theta = None
 
+    def get_random_model_params(self, stdev=0.1):
+        return np.random.randn(self.param_count) * stdev  # randn return samples of "standard normal" distribution
+
+    #this is called when execute: del o
     def __del__(self):
         logger.debug('Optimizer {} cleanning up {} workers...'.format(
             self.optim_id, len(self.engines)))
@@ -389,6 +432,11 @@ class ESOptimizer:
         logger.debug('Optimizer {} broadcasting theta...'.format(self.optim_id))
         self.engines.apply(set_worker_theta, theta, self.optim_id)
 
+    def broadcast_env_params(self, env_param):
+        '''On all worker, set thetas[this optimizer] to theta'''
+        logger.debug('Optimizer {} broadcasting theta...'.format(self.optim_id))
+        self.engines.apply(set_worker_env_param(), env_param, self.optim_id)
+
     def add_env(self, env):
         '''On all worker, add env_name to niche'''
         logger.debug('Optimizer {} add env {}...'.format(self.optim_id, env.name))
@@ -516,6 +564,26 @@ class ESOptimizer:
             self.noise_std)
 
         return step_results, theta, step_t_start
+
+    #start the mutual simulation,
+    def start_mutual_opt_step(self, theta=None, env_param=None):
+
+        step_t_start = time.time()
+        if theta is None:
+            theta = self.theta
+        if env_param is None:
+            env_param = self.env_param
+        self.broadcast_theta(theta)#set the theta for all the workers
+        self.broadcast_env_params(env_param)
+
+        step_results = self.start_chunk(
+            run_po_batch,
+            self.batches_per_chunk,
+            self.batch_size,
+            self.noise_std)
+
+        return step_results, theta, step_t_start
+
     #each task is a triple tuple: the original theta, its modified versions performing in the same env, the time started:
     def get_step(self, res, propose_with_adam=True, decay_noise=True, propose_only=False):
         step_tasks, theta, step_t_start = res#theta is a original,unmodified theta;

@@ -23,6 +23,8 @@ from poet_distributed.niches.box2d.env import Env_config
 from poet_distributed.reproduce_ops import Reproducer
 from poet_distributed.novelty import compute_novelty_vs_archive
 import json
+from poet_distributed.niches.box2d.env_model import EnvModel
+from poet_distributed.niches.box2d.env_model import env_model_config
 
 #env:the encodings of the env,i.e., a set of parameters;  niche:the actual env created based on the env parameters
 def construct_niche_fns_from_env(args, env, seed):
@@ -44,7 +46,7 @@ def construct_niche_fns_from_env(args, env, seed):
     return niche_name, niche_wrapper(list(configs), seed)
 
 
-class MultiESOptimizer:
+class MultualESOptimizer:
     #create an
     def __init__(self, args, engines, scheduler, client):
         #initializations about ipp
@@ -53,69 +55,51 @@ class MultiESOptimizer:
         self.engines.block = True
         self.scheduler = scheduler
         self.client = client
-
-        self.env_registry = OrderedDict()
-        self.env_archive = OrderedDict()
-        self.env_reproducer = Reproducer(args)
         self.optimizers = OrderedDict()
+        self.init = 'random'
 
-        #start the training from a previously generated env file, as json format
-        if args.start_from:
-            logger.debug("args.start_from {}".format(args.start_from))
-            with open(args.start_from) as f:
-                start_from_config = json.load(f)
+        env = Env_config(
+            name='flat',#the default name of the env
+            ground_roughness=0,
+            pit_gap=[],
+            stump_width=[],
+            stump_height=[],
+            stump_float=[],
+            stair_height=[],
+            stair_width=[],
+            stair_steps=[])
+        #test ground_roughtness first
 
-            logger.debug(start_from_config['path'])
-            logger.debug(start_from_config['niches'])
-            logger.debug(start_from_config['exp_name'])
+        #every optimaizer is based on an env and maintains parameters for an agent
+        self.add_optimizer(env=env, seed=args.master_seed)
 
-            path = start_from_config['path']
-            exp_name = start_from_config['exp_name']
-            prefix = path + exp_name +'/'+exp_name+'.'
-            for niche_name, niche_file in sorted(start_from_config['niches'].items()):
-                logger.debug(niche_name)
-                niche_file_complete = prefix + niche_file
-                logger.debug(niche_file_complete)
-                with open(niche_file_complete) as f:
-                    data = json.load(f)
-                    logger.debug('loading file %s' % (niche_file_complete))
-                    model_params = np.array(data[0])  # assuming other stuff is in data
-                    logger.debug(model_params)
+    def get_random_model_params(self, stdev=0.1):
+        return np.random.randn(2804) * stdev  # randn return samples of "standard normal" distribution
 
-                env_def_file = prefix + niche_name + '.env.json'
-                with open(env_def_file, 'r') as f:
-                    exp = json.loads(f.read())
 
-                env = Env_config(**exp['config'])
-                logger.debug(env)
-                seed = exp['seed']
-                self.add_optimizer(env=env, seed=seed, model_params=model_params)
-
-        else:#start from an empty
-            env = Env_config(
-                name='flat',#the default name of the env
-                ground_roughness=0,
-                pit_gap=[],
-                stump_width=[],
-                stump_height=[],
-                stump_float=[],
-                stair_height=[],
-                stair_width=[],
-                stair_steps=[])
-            #every optimaizer is based on an env and maintains parameters for an agent
-            self.add_optimizer(env=env, seed=args.master_seed)
-
-    def create_optimizer(self, env, seed, created_at=0, model_params=None, is_candidate=False):
+    def create_optimizer(self, env, seed, created_at=0, model_params=None, is_candidate=False,env_param=None):
 
         assert env != None
-        #
-        optim_id, niche_fn = construct_niche_fns_from_env(args=self.args, env=env, seed=seed)
-
-        niche = niche_fn()
         if model_params is not None:
             theta = np.array(model_params)
         else:
-            theta=niche.initial_theta()
+            theta=self.get_random_model_params()
+        # after creating the theta, generate env config by neural network
+        env_model = EnvModel(env_model_config)
+        ground_roughness= env_model.feed_forward(theta)
+        env = Env_config(
+            name='flat',  # the default name of the env
+            ground_roughness=ground_roughness,
+            pit_gap=[],
+            stump_width=[],
+            stump_height=[],
+            stump_float=[],
+            stair_height=[],
+            stair_width=[],
+            stair_steps=[])
+
+        optim_id, niche_fn = construct_niche_fns_from_env(args=self.args, env=env, seed=seed)
+
         assert optim_id not in self.optimizers.keys()
 
         return ESOptimizer(
@@ -143,24 +127,9 @@ class MultiESOptimizer:
 
     #model_params is the parameter of an Agent:each Optimizer corresponds to an Env and Agent
     def add_optimizer(self, env, seed, created_at=0, model_params=None):
-        '''
-            creat a new optimizer/niche
-            created_at: the iteration when this niche is created
-        '''
         o = self.create_optimizer(env, seed, created_at, model_params)
         optim_id = o.optim_id
         self.optimizers[optim_id] = o
-
-        assert optim_id not in self.env_registry.keys()
-        assert optim_id not in self.env_archive.keys()
-        self.env_registry[optim_id] = env
-        self.env_archive[optim_id] = env
-        #dump the env:clear the original env file and rewrite a new env json to it
-        log_file = self.args.log_file
-        env_config_file = log_file + '/' + log_file.split('/')[-1] + '.' + optim_id + '.env.json'
-        record = {'config': env._asdict(), 'seed': seed}
-        with open(env_config_file,'w') as f:
-            json.dump(record, f)
 
     def delete_optimizer(self, optim_id):
         assert optim_id in self.optimizers.keys()
@@ -191,23 +160,7 @@ class MultiESOptimizer:
         #self.client.metadata.clear()
 
 
-    def ind_es_step(self, iteration):
-        tasks = [o.start_step() for o in self.optimizers.values()]
 
-        for optimizer, task in zip(self.optimizers.values(), tasks):#
-
-            optimizer.theta, stats = optimizer.get_step(task)#compute gradient and optimize theta
-            self_eval_task = optimizer.start_theta_eval(optimizer.theta)#eval the optimized theta by run it in the env;
-            self_eval_stats = optimizer.get_theta_eval(self_eval_task)
-
-            logger.info('Iter={} Optimizer {} theta_mean {} best po {} iteration spent {}'.format(
-                iteration, optimizer.optim_id, self_eval_stats.eval_returns_mean,
-                stats.po_returns_max, iteration - optimizer.created_at))#po_return is the reward of the original theta.
-
-            optimizer.update_dicts_after_es(stats=stats,
-                self_eval_stats=self_eval_stats)
-
-        self.clean_up_ipyparallel()
 
     def transfer(self, propose_with_adam, checkpointing, reset_optimizer):
         logger.info('Computing direct transfers...')
@@ -275,7 +228,7 @@ class MultiESOptimizer:
         return repro_candidates, delete_candidates
 
 
-    def pass_dedup(self, env_config):#remove duplicated env:if it already exists,don't add it again
+    def pass_dedup(self, env_config):
         if env_config.name in self.env_registry.keys():
             logger.debug("active env already. reject!")
             return False
@@ -401,6 +354,27 @@ class MultiESOptimizer:
             if iteration % steps_before_transfer == 0:
                 for o in self.optimizers.values():
                     o.save_to_logger(iteration)
+
+    #mutually optimize
+    def ind_es_step(self, iteration):
+        tasks = [o.start_mutual_opt_step() for o in self.optimizers.values()]
+
+        for optimizer, task in zip(self.optimizers.values(), tasks):#
+
+            optimizer.theta, stats = optimizer.get_step(task)#compute gradient and optimize theta
+            self_eval_task = optimizer.start_theta_eval(optimizer.theta)#eval the optimized theta by run it in the env;
+            self_eval_stats = optimizer.get_theta_eval(self_eval_task)
+
+            logger.info('Iter={} Optimizer {} theta_mean {} best po {} iteration spent {}'.format(
+                iteration, optimizer.optim_id, self_eval_stats.eval_returns_mean,
+                stats.po_returns_max, iteration - optimizer.created_at))#po_return is the reward of the original theta.
+
+            optimizer.update_dicts_after_es(stats=stats,
+                self_eval_stats=self_eval_stats)
+
+        self.clean_up_ipyparallel()
+
+
 
     #mutually optimization:optimize the agent and env simultaneously, and get the balanced result
     def optimize_mutually(self,iterations=200):

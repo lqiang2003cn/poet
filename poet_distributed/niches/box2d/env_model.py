@@ -68,7 +68,7 @@ class EnvModel:
             b = self.bias[i]
             h = np.matmul(h, w) + b
             h = self.activations[i](h)
-            print('h for the layer',i ,'is :',h)
+            #print('h for the layer',i ,'is :',h)
         h=h*10#to make h a number between [0,10]
         return h
 

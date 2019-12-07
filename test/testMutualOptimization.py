@@ -17,8 +17,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 from poet_distributed.es import initialize_worker  # noqa
-from poet_distributed.poet_algo import MultiESOptimizer  # noqa
 import numpy as np
+from poet_distributed.mutual_optimization import MultualESOptimizer
 
 
 parser = ArgumentParser()
@@ -69,10 +69,10 @@ def test_main(args):
     #set master_seed
     np.random.seed(args.master_seed)
     #zoo means there a lot of optimizers in the zoo :)
-    args.start_from ='/home/qiangliu/logs/start_from_config.json'
-    args.recordVideo = True
-    args.render_mode = 'rgb_array'
-    optimizer_zoo = MultiESOptimizer(args=args, engines=engines, scheduler=scheduler, client=client)
+    #args.start_from ='/home/qiangliu/logs/start_from_config.json'
+    args.recordVideo = False
+    args.render_mode = None
+    optimizer_zoo = MultualESOptimizer(args=args, engines=engines, scheduler=scheduler, client=client)
     for op_name, op in optimizer_zoo.optimizers.items():
         op.start_single_theta_eval(op.theta)
     print('hold')

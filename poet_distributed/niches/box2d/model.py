@@ -162,7 +162,7 @@ class Model:
         self.set_model_params(model_params)
 
     def get_random_model_params(self, stdev=0.1):
-        return np.random.randn(self.param_count) * stdev
+        return np.random.randn(self.param_count) * stdev #randn return samples of "standard normal" distribution
 
 def simulate(model, seed, train_mode=False, render_mode=False, num_episode=5,
              max_len=-1, env_config_this_sim=None):
