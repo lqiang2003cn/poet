@@ -20,7 +20,9 @@ class Niche:
         lengths = np.zeros(batch_size, dtype='int')
 
         for i, theta in enumerate(thetas):
-            returns[i], lengths[i] = self.rollout(
+            returns[i], lengths[i] = self.rollout(#actually call the rollout method of the subclass Box2DNiche
                 theta, random_state=random_state, eval=eval)
 
         return returns, lengths
+
+

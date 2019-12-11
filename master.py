@@ -15,12 +15,13 @@
 
 from argparse import ArgumentParser
 import logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 import numpy as np
 
 from poet_distributed.es import initialize_worker  # noqa
-from poet_distributed.poet_algo import MultiESOptimizer  # noqa
+from mutual_optimization import MultualESOptimizer
 
 parser = ArgumentParser()
 parser.add_argument('log_file')
@@ -70,15 +71,8 @@ def run_main(args):
     args.start_from = '/home/qiangliu/logs/start_from_config.json'
     args.recordVideo = False
     args.render_mode = None
-    optimizer_zoo = MultiESOptimizer(args=args, engines=engines, scheduler=scheduler, client=client)
-
-    optimizer_zoo.optimize(
-        iterations=args.n_iterations,
-        propose_with_adam=args.propose_with_adam,
-        reset_optimizer=True,
-        checkpointing=args.checkpointing,
-        #steps_before_transfer=1)
-        steps_before_transfer=args.steps_before_transfer)
-    #client.shutdown()
+    optimizer_zoo = MultualESOptimizer(args=args, engines=engines, scheduler=scheduler, client=client)
+    optimizer_zoo.add_optimizer(env_name='theEnv',seed=args.master_seed)
+    optimizer_zoo.optimize_mutually(iterations=1000,args=args)
 
 run_main(args)

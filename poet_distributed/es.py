@@ -56,8 +56,15 @@ POResult = namedtuple('POResult', [
     'returns',
     'lengths',
 ])
+
+MutualOptResult = namedtuple('MutualOptResult', [
+    'result',
+    'length',
+])
+
 EvalResult = namedtuple('EvalResult', ['returns', 'lengths'])
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def initialize_worker():
@@ -69,7 +76,7 @@ def initialize_worker():
 
 
 def set_worker_theta(theta, optim_id):
-    global thetas
+    global thetas #for all workers, set the thetas
     thetas[optim_id] = theta
 
 def set_worker_env_param(env_param, optim_id):
@@ -96,7 +103,7 @@ def run_po_batch(optim_id, batch_size, rs_seed, noise_std):
     theta = thetas[optim_id]
 
     random_state.seed(rs_seed)
-
+    logger.info('dddd')
     noise_inds = np.asarray([noise.sample_index(random_state, len(theta))
                              for i in range(batch_size)],
                             dtype='int')
@@ -113,36 +120,21 @@ def run_po_batch(optim_id, batch_size, rs_seed, noise_std):
          for noise_idx in noise_inds), batch_size, random_state)
 
     return POResult(returns=returns, noise_inds=noise_inds, lengths=lengths)
+
+def run_mutual_opt(optim_id,rs_seed):
+    global noise, niches, thetas, random_state
+    niche = niches[optim_id]
+    theta = thetas[optim_id]
+    random_state.seed(rs_seed)
+    result, length = niche.rollout(theta,random_state)
+    return MutualOptResult(result=result, length=length)
+
 
 
 def sample_env_params(optim_id, batch_size, rs_seed, noise_std):
     global noise, niches, thetas, random_state
     niche = niches[optim_id]
 
-
-def run_mutual_opt_batch(optim_id, batch_size, rs_seed, noise_std):
-    global noise, niches, thetas, random_state
-    niche = niches[optim_id]
-    theta = thetas[optim_id]
-
-    random_state.seed(rs_seed)
-
-    noise_inds = np.asarray([noise.sample_index(random_state, len(theta))
-                             for i in range(batch_size)],
-                            dtype='int')
-
-    returns = np.zeros((batch_size, 2))
-    lengths = np.zeros((batch_size, 2), dtype='int')
-
-    returns[:, 0], lengths[:, 0] = niche.rollout_batch(
-        (theta + noise_std * noise.get(noise_idx, len(theta))
-         for noise_idx in noise_inds), batch_size, random_state)
-
-    returns[:, 1], lengths[:, 1] = niche.rollout_batch(
-        (theta - noise_std * noise.get(noise_idx, len(theta))
-         for noise_idx in noise_inds), batch_size, random_state)
-
-    return POResult(returns=returns, noise_inds=noise_inds, lengths=lengths)
 
 
 def setup_env_param(optim_id,env_param):
@@ -170,6 +162,7 @@ class ESOptimizer:
                  engines,
                  scheduler,
                  theta,
+                 env_param,
                  make_niche,
                  learning_rate,
                  batches_per_chunk,
@@ -187,7 +180,8 @@ class ESOptimizer:
                  optim_id=0,
                  log_file='unname.log',
                  created_at=0,
-                 is_candidate=False):
+                 is_candidate=False,
+                 env_config=None):
 
         from .optimizers import Adam, SimpleSGD
 
@@ -198,12 +192,17 @@ class ESOptimizer:
         self.scheduler = scheduler
 
         self.theta = theta
+        self.env_param = env_param
+        self.env_config = env_config
 
         #print(self.theta)
         logger.debug('Optimizer {} optimizing {} parameters'.format(
             optim_id, len(theta)))
-        self.optimizer = Adam(self.theta, stepsize=learning_rate)
+
+        self.optimizer = Adam(self.theta, stepsize=learning_rate)#using Adam optimizer
+        self.env_param_optimizer = Adam(self.env_param,stepsize=learning_rate)
         self.sgd_optimizer = SimpleSGD(stepsize=learning_rate)
+
         self.lr_decay = lr_decay
         self.lr_limit = lr_limit
         self.noise_decay = noise_decay
@@ -460,6 +459,8 @@ class ESOptimizer:
                 self.scheduler.apply(runner, self.optim_id, batch_size, rs_seeds[i], *args))
         return chunk_tasks
 
+
+
     def get_chunk(self, tasks):
         return [task.get() for task in tasks]#defiend in the ipyparallel framework, just return the result of the task
 
@@ -557,6 +558,7 @@ class ESOptimizer:
             theta = self.theta
         self.broadcast_theta(theta)#set the theta for all the workers
 
+
         step_results = self.start_chunk(
             run_po_batch,
             self.batches_per_chunk,
@@ -566,23 +568,13 @@ class ESOptimizer:
         return step_results, theta, step_t_start
 
     #start the mutual simulation,
-    def start_mutual_opt_step(self, theta=None, env_param=None):
-
-        step_t_start = time.time()
-        if theta is None:
-            theta = self.theta
-        if env_param is None:
-            env_param = self.env_param
+    def start_mutual_opt_step(self, theta):
+        rs_seed = np.random.randint(np.int32(2 ** 31 - 1))
         self.broadcast_theta(theta)#set the theta for all the workers
-        self.broadcast_env_params(env_param)
+        step_result=self.scheduler.apply(run_mutual_opt, self.optim_id, rs_seed)
+        return step_result
 
-        step_results = self.start_chunk(
-            run_po_batch,
-            self.batches_per_chunk,
-            self.batch_size,
-            self.noise_std)
 
-        return step_results, theta, step_t_start
 
     #each task is a triple tuple: the original theta, its modified versions performing in the same env, the time started:
     def get_step(self, res, propose_with_adam=True, decay_noise=True, propose_only=False):

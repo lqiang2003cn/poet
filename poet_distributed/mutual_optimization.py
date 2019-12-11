@@ -13,7 +13,6 @@
 # limitations under the License.
 
 
-from .logger import CSVLogger
 import logging
 logger = logging.getLogger(__name__)
 import numpy as np
@@ -23,8 +22,10 @@ from poet_distributed.niches.box2d.env import Env_config
 from poet_distributed.reproduce_ops import Reproducer
 from poet_distributed.novelty import compute_novelty_vs_archive
 import json
-from poet_distributed.niches.box2d.env_model import EnvModel
+from poet_distributed.niches.box2d.env_model import EnvModel, get_env_neural_output
 from poet_distributed.niches.box2d.env_model import env_model_config
+from poet_distributed.noise_module import noise
+import uuid
 
 #env:the encodings of the env,i.e., a set of parameters;  niche:the actual env created based on the env parameters
 def construct_niche_fns_from_env(args, env, seed):
@@ -58,47 +59,26 @@ class MultualESOptimizer:
         self.optimizers = OrderedDict()
         self.init = 'random'
 
-        env = Env_config(
-            name='flat',#the default name of the env
-            ground_roughness=0,
-            pit_gap=[],
-            stump_width=[],
-            stump_height=[],
-            stump_float=[],
-            stair_height=[],
-            stair_width=[],
-            stair_steps=[])
-        #test ground_roughtness first
-
-        #every optimaizer is based on an env and maintains parameters for an agent
-        self.add_optimizer(env=env, seed=args.master_seed)
-
     def get_random_model_params(self, stdev=0.1):
-        return np.random.randn(2804) * stdev  # randn return samples of "standard normal" distribution
+        return np.random.uniform(0, 1, 2804)  # randn return samples of "standard normal" distribution
 
+    def get_random_env_params(self, stdev=0.1):
+        return np.random.uniform(0, 1, 290701) # randn return samples of "standard normal" distribution
 
-    def create_optimizer(self, env, seed, created_at=0, model_params=None, is_candidate=False,env_param=None):
+    def create_optimizer(self,env_name, seed, created_at=0, model_params=None, is_candidate=False,env_param=None):
 
-        assert env != None
         if model_params is not None:
             theta = np.array(model_params)
         else:
             theta=self.get_random_model_params()
-        # after creating the theta, generate env config by neural network
-        env_model = EnvModel(env_model_config)
-        ground_roughness= env_model.feed_forward(theta)
-        env = Env_config(
-            name='flat',  # the default name of the env
-            ground_roughness=ground_roughness,
-            pit_gap=[],
-            stump_width=[],
-            stump_height=[],
-            stump_float=[],
-            stair_height=[],
-            stair_width=[],
-            stair_steps=[])
 
-        optim_id, niche_fn = construct_niche_fns_from_env(args=self.args, env=env, seed=seed)
+        if env_param is None:
+            env_param = self.get_random_env_params()
+
+        # after creating the theta, generate env config by neural network
+        env_config = get_env_neural_output(theta,env_param,env_name)
+        #the optim_id comes from the env.name
+        optim_id, niche_fn = construct_niche_fns_from_env(args=self.args, env=env_config, seed=seed)
 
         assert optim_id not in self.optimizers.keys()
 
@@ -107,6 +87,7 @@ class MultualESOptimizer:
             engines=self.engines,
             scheduler=self.scheduler,
             theta=theta,
+            env_param=env_param,
             make_niche=niche_fn,
             learning_rate=self.args.learning_rate,
             lr_decay=self.args.lr_decay,
@@ -123,11 +104,12 @@ class MultualESOptimizer:
             noise_limit=self.args.noise_limit,
             log_file=self.args.log_file,
             created_at=created_at,
-            is_candidate=is_candidate)
+            is_candidate=is_candidate,
+            env_config=env_config)
 
     #model_params is the parameter of an Agent:each Optimizer corresponds to an Env and Agent
-    def add_optimizer(self, env, seed, created_at=0, model_params=None):
-        o = self.create_optimizer(env, seed, created_at, model_params)
+    def add_optimizer(self,env_name, seed, created_at=0, model_params=None,env_param=None):
+        o = self.create_optimizer(env_name,seed, created_at, model_params=model_params,env_param=env_param)
         optim_id = o.optim_id
         self.optimizers[optim_id] = o
 
@@ -136,9 +118,6 @@ class MultualESOptimizer:
         #assume optim_id == env_id for single_env niches
         o = self.optimizers.pop(optim_id)
         del o
-        assert optim_id in self.env_registry.keys()
-        self.env_registry.pop(optim_id)
-        logger.info('DELETED {} '.format(optim_id))
 
     def clean_up_ipyparallel(self):
         logger.debug('Clean up ipyparallel ...')
@@ -355,28 +334,114 @@ class MultualESOptimizer:
                 for o in self.optimizers.values():
                     o.save_to_logger(iteration)
 
+
     #mutually optimize
-    def ind_es_step(self, iteration):
-        tasks = [o.start_mutual_opt_step() for o in self.optimizers.values()]
+    def mutual_opt_step(self, iteration,args=None):
+        env_num_per_iter = args.batches_per_chunk
+        random_state = np.random.RandomState()
+        #for each iteration, create 16 new variants of the env and eval agents in them
+        env_seeds = np.random.randint(np.int32(2 ** 31 - 1), size=env_num_per_iter)
+        new_env_optim_ids =['theEnv']
+        env_noise_indexs = []
+        for i in range(0,env_num_per_iter):
+            theEnvOpt = self.optimizers['theEnv']
+            #print(theEnvOpt.env_param)
+            random_state.seed(env_seeds[i])
+            #random noise indexs for the env_params
+            noise_ind = noise.sample_index(random_state, len(theEnvOpt.env_param))
+            #call it twice because its pos and neg
+            env_noise_indexs.append(noise_ind)
+            env_noise_indexs.append(noise_ind)
+            #print('noise index is:',noise_inds)
+            #generate new env_params based on the noise_inds
+            pos_env_param =theEnvOpt.env_param + theEnvOpt.noise_std * noise.get(noise_ind, len(theEnvOpt.env_param))
+            seed = np.random.randint(10000000)
+            env_name = str(i)+'0_mut_pos_theEnv_'+ str(uuid.uuid1())
+            new_env_optim_ids.append(env_name)
+            #use the current theta as input,
+            self.add_optimizer(env_name=env_name,seed=seed,model_params=theEnvOpt.theta,env_param=pos_env_param)
 
-        for optimizer, task in zip(self.optimizers.values(), tasks):#
+            neg_env_param =theEnvOpt.env_param - theEnvOpt.noise_std * noise.get(noise_ind, len(theEnvOpt.env_param))
+            seed = np.random.randint(10000000)
+            env_name = str(i)+'1_mut_neg_theEnv_' + str(uuid.uuid1())
+            new_env_optim_ids.append(env_name)
+            # use the current theta as input,
+            self.add_optimizer(env_name=env_name, seed=seed, model_params=theEnvOpt.theta, env_param=neg_env_param)
 
-            optimizer.theta, stats = optimizer.get_step(task)#compute gradient and optimize theta
-            self_eval_task = optimizer.start_theta_eval(optimizer.theta)#eval the optimized theta by run it in the env;
-            self_eval_stats = optimizer.get_theta_eval(self_eval_task)
+        #generate thetas for the population
+        new_theta_list =[]
+        agent_num_per_iter = args.batches_per_chunk
+        agent_noise_indexs = []
+        theta_seeds = np.random.randint(np.int32(2 ** 31 - 1), size=agent_num_per_iter)
+        for i in range(0, agent_num_per_iter):
+            random_state.seed(env_seeds[i])
+            # random noise indexs for the env_params
+            noise_ind = noise.sample_index(random_state, len(theEnvOpt.theta))
+            agent_noise_indexs.append(noise_ind)
+            agent_noise_indexs.append(noise_ind)
+            new_pos_theta = theEnvOpt.theta + theEnvOpt.noise_std * noise.get(noise_ind, len(theEnvOpt.theta))
+            new_theta_list.append(new_pos_theta)
+            new_neg_theta = theEnvOpt.theta - theEnvOpt.noise_std * noise.get(noise_ind, len(theEnvOpt.theta))
+            new_theta_list.append(new_neg_theta)
 
-            logger.info('Iter={} Optimizer {} theta_mean {} best po {} iteration spent {}'.format(
-                iteration, optimizer.optim_id, self_eval_stats.eval_returns_mean,
-                stats.po_returns_max, iteration - optimizer.created_at))#po_return is the reward of the original theta.
+        result_matrix = np.zeros((env_num_per_iter*2,env_num_per_iter*2))
+        row_num=0
+        for o in self.optimizers.values():
+            if o.optim_id != 'theEnv':
+                col_num=0
+                step_results =[]
+                for t in new_theta_list:
+                    step_results.append(o.start_mutual_opt_step(t))
+                    col_num += 1
+                row_num += 1
+        result_matrix = np.array([task.get() for task in step_results]).reshape(result_matrix.shape)
 
-            optimizer.update_dicts_after_es(stats=stats,
-                self_eval_stats=self_eval_stats)
+        #print(result_matrix)
+        updated_theta,updated_env=self.update_by_matrix(result_matrix,agent_noise_indexs,env_noise_indexs,theEnvOpt)
+
+        for opt in new_env_optim_ids:
+            self.delete_optimizer(opt)
+
+        #eval the updated params
+        seed = np.random.randint(10000000)
+        env_name = 'theEnv'
+        self.add_optimizer(env_name=env_name, seed=seed, model_params=updated_theta, env_param=updated_env)
+        theEnv = self.optimizers['theEnv']
+        step_result = theEnv.start_mutual_opt_step(t)
+        print('the updated env roughness is:', theEnv.env_config.ground_roughness)
+        print('the updated eval reward is:',step_result.get().result)
+
 
         self.clean_up_ipyparallel()
 
+    #choose the max theta, choose the middle env
+    def update_by_matrix(self,matrix,agent_noise_indexs,env_noise_indexs,theEnvOpt):
+        shape = matrix.shape
+        row_num = shape[0]
+        col_num = shape[1]
+        #calculate agent gradient
+        sum_of_cols = np.sum(matrix,axis=0)
+        max_sum_ind = np.argmax(sum_of_cols)
+        agent_grad = noise.get(agent_noise_indexs[max_sum_ind], len(theEnvOpt.theta))
+        #agent_grad = agent_grad/theEnvOpt.noise_std
 
+        #calculate env gradient
+        row_sum = np.sum(matrix, axis=1)
+        row_order_index = np.argsort(row_sum)
+        middle_index=row_order_index[int(row_num/2)]
+        env_grad = noise.get(env_noise_indexs[middle_index], len(theEnvOpt.env_param))
+        #env_grad = env_grad/theEnvOpt.noise_std
+
+        #theta is the updated theta
+        _,updated_theta = theEnvOpt.optimizer.update(theEnvOpt.theta, -agent_grad + theEnvOpt.l2_coeff * theEnvOpt.theta)  # theta:the original theta
+        _,updated_env_param = theEnvOpt.env_param_optimizer.update(theEnvOpt.env_param, -env_grad + theEnvOpt.l2_coeff * theEnvOpt.env_param)  # theta:the original theta
+
+        theEnvOpt.optimizer.stepsize = max(theEnvOpt.optimizer.stepsize * theEnvOpt.lr_decay, theEnvOpt.lr_limit)
+        theEnvOpt.noise_std = max(theEnvOpt.noise_std * theEnvOpt.noise_decay, theEnvOpt.noise_limit)
+
+        return updated_theta,updated_env_param
 
     #mutually optimization:optimize the agent and env simultaneously, and get the balanced result
-    def optimize_mutually(self,iterations=200):
+    def optimize_mutually(self,iterations,args=None):
         for iteration in range(iterations):
-            self.ind_es_step(iteration=iteration)
+            self.mutual_opt_step(iteration=iteration,args=args)

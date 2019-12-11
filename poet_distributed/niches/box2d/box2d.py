@@ -70,6 +70,7 @@ class Box2DNiche(Niche):
         else:
             seed = self.seed
         for env_config in self.env_configs.values():
+            print('simulation--theta:',theta[0:1],' env id:',env_config.name,' roughtness:',env_config.ground_roughness)
             returns, lengths = simulate(
                 self.model, seed=seed, train_mode=not eval, num_episode=1, env_config_this_sim=env_config)
             total_returns += returns[0]

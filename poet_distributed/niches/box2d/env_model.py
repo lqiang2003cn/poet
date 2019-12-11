@@ -5,6 +5,9 @@ from collections import namedtuple
 
 import numpy as np
 import logging
+
+from bipedal_walker_custom import Env_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,6 +19,10 @@ env_model_config = EnvModelConfig(
     output_size=1,
     layers=[100, 100]
 )
+
+def softmax(x):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis=0)
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
@@ -38,7 +45,7 @@ class EnvModel:
                        (self.layer_1, self.layer_2),
                        (self.layer_2, self.output_size)]
 
-        self.activations = [sigmoid,sigmoid,sigmoid]#three layers;
+        self.activations = [relu,relu,relu]#three layers;
         self.weight = []
         self.bias = []
         self.param_count = 0
@@ -54,6 +61,8 @@ class EnvModel:
             self.weight.append(np.zeros(shape=shape))
             self.bias.append(np.zeros(shape=shape[1]))
 
+            # self.weight.append(np.ones(shape=shape))
+            # self.bias.append(np.ones(shape=shape[1]))
 
             self.param_count += (np.product(shape) + shape[1])
             idx += 1
@@ -67,32 +76,43 @@ class EnvModel:
             w = self.weight[i]
             b = self.bias[i]
             h = np.matmul(h, w) + b
+            #print('h for the layer', i, 'before activation is :', h)
             h = self.activations[i](h)
             #print('h for the layer',i ,'is :',h)
-        h=h*10#to make h a number between [0,10]
+        h=(h/2805010.1)#to make h a number between [0,10]
+        print('model output:',h)
         return h
 
-    #model_params is theta, a flattened array of weights and bias,need to rewrite
-    # def set_model_params(self, model_params):
-    #     pointer = 0
-    #     for i in range(len(self.shapes)):
-    #         w_shape = self.shapes[i]
-    #         b_shape = self.shapes[i][1]
-    #         s_w = np.product(w_shape)
-    #         s = s_w + b_shape
-    #         chunk = np.array(model_params[pointer:pointer + s])
-    #         self.weight[i] = chunk[:s_w].reshape(w_shape)
-    #         self.bias[i] = chunk[s_w:].reshape(b_shape)
-    #         pointer += s
-    #         if self.output_noise[i]:
-    #             s = b_shape
-    #             self.bias_log_std[i] = np.array(
-    #                 model_params[pointer:pointer + s])
-    #             self.bias_std[i] = np.exp(
-    #                 self.sigma_factor * self.bias_log_std[i] + self.sigma_bias)
-    #             if self.render_mode:
-    #                 print("bias_std, layer", i, self.bias_std[i])
-    #             pointer += s
+    # model_params is theta, a flattened array of weights and bias,need to rewrite
+    def set_model_params(self, model_params):
+        pointer = 0
+        for i in range(len(self.shapes)):
+            w_shape = self.shapes[i]
+            b_shape = self.shapes[i][1]
+            s_w = np.product(w_shape)
+            s = s_w + b_shape
+            chunk = np.array(model_params[pointer:pointer + s])
+            self.weight[i] = chunk[:s_w].reshape(w_shape)
+            self.bias[i] = chunk[s_w:].reshape(b_shape)
+            pointer += s
+
+
+def get_env_neural_output(theta,env_param,env_name):
+    env_model = EnvModel(env_model_config)
+    env_model.set_model_params(env_param)
+    ground_roughness = env_model.feed_forward(theta)
+    env = Env_config(
+        name=env_name,  # the default name of the env
+        ground_roughness=ground_roughness[0],
+        pit_gap=[],
+        stump_width=[],
+        stump_height=[],
+        stump_float=[],
+        stair_height=[],
+        stair_width=[],
+        stair_steps=[])
+    return env
+
     #
     # #you may need to load a env model from a json file?
     # def load_model(self, filename):
